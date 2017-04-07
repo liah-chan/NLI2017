@@ -1,0 +1,496 @@
+import gensim
+from gensim import corpora
+from gensim.models.tfidfmodel import TfidfModel
+from gensim.models.logentropy_model import LogEntropyModel
+import numpy as np
+#from vec_util import encode_label
+import pickle
+from sklearn.metrics import f1_score,accuracy_score,confusion_matrix
+from sklearn.feature_extraction.text import CountVectorizer
+#from sklearn.ensemble import BaggingClassifier
+from sklearn.model_selection import KFold, cross_val_score
+from scipy.sparse import csr_matrix, csc_matrix, hstack, coo_matrix
+import scipy
+from gensim.matutils import Sparse2Corpus,Scipy2Corpus,corpus2csc
+from sklearn import svm
+import sys
+import operator
+from operator import itemgetter
+#from vec_util import in_same_lf, group_languages,decide_group
+
+L1_LABEL_SET = ['ARA','DEU','FRA','HIN','ITA','JPN','KOR','SPA','TEL','TUR','ZHO']
+
+def encode_label(label):
+	return L1_LABEL_SET.index(label)
+
+def get_y(filename):
+	idxs = []
+	with open(filename,'r') as f:
+		for line in f:
+			label = (line.split('\t')[1]).strip()
+			idx = encode_label(label)
+			idxs.append(idx)
+	return np.array(idxs,dtype=np.int)
+
+def get_line_as_str(filename):
+	with open(filename,'r') as f:
+		for line in f:
+			essay = line.split('\t')[0]
+			yield str(essay)
+
+def most_informative_feature_for_class(vectorizer, classifier, n=10):
+	labelid = list(classifier.classes_)
+	feature_names = vectorizer.get_feature_names()
+	# print(classifier.coef_[labelid])
+	# print(feature_names[0:100])
+	for i in labelid:
+		topn = sorted(zip(classifier.coef_[i,:], feature_names), key = itemgetter(0))[-n:]
+	# topn = sorted(zip(classifier.coef_[labelid], feature_names), key=lambda x: x[0])[-n:]
+	# topn = np.argsort(zip(classifier.coef_[labelid], feature_names))
+		labelname = L1_LABEL_SET[i]
+		print(labelname+":")
+		for coef, feat in topn:
+			print("feature:{:s} ; coef:{:f}".format(feat,coef))
+
+def most_informative_char_for_class(classifier,error_char_list, n=10):
+	labelid = list(classifier.classes_)
+	feature_names = error_char_list
+	# print(classifier.coef_[labelid])
+	# print(feature_names[0:100])
+	for i in labelid:
+		topn = sorted(zip(classifier.coef_[i,0:len(error_char_list)], feature_names), key = itemgetter(0))[-n:]
+	# topn = sorted(zip(classifier.coef_[labelid], feature_names), key=lambda x: x[0])[-n:]
+	# topn = np.argsort(zip(classifier.coef_[labelid], feature_names))
+		labelname = L1_LABEL_SET[i]
+		print(labelname+":")
+		for coef, feat in topn:
+			print("feature:{:s} ; coef:{:f}".format(feat,coef))
+
+#get the error idx
+def get_error_idx(vectorizer, error_list):
+	feature_names = vectorizer.get_feature_names()
+	idxs = []
+	for name in feature_names:
+		if str(name) in error_list:
+			idxs.append(feature_names.index(str(name)))
+	return idxs
+
+def most_informative_error_for_class(vectorizer, classifier, error_list, n=10):
+	labelid = list(classifier.classes_)
+	feature_names = vectorizer.get_feature_names()
+	# print(classifier.coef_[labelid])
+	# print(feature_names[0:100])
+	idxs = get_error_idx(vectorizer, error_list)
+	# idxs = np.where(feature_names in error_list)
+	for i in labelid:
+		coef = classifier.coef_[i,:]
+		topn = sorted(zip([coef[idx] for idx in idxs], [feature_names[idx] for idx in idxs] ), key = itemgetter(0))[-n:]
+	# topn = sorted(zip(classifier.coef_[labelid], feature_names), key=lambda x: x[0])[-n:]
+	# topn = np.argsort(zip(classifier.coef_[labelid], feature_names))
+		labelname = L1_LABEL_SET[i]
+		print(labelname+":")
+		for coef, feat in topn:
+			print("feature:{:s} ; coef:{:f}".format(feat,coef))
+
+def get_separate_vocab(target = ['word', 'lemma', 'error'],ngram_range = (1,3),
+			analyzer = 'word', pattern = r'\b\w+\b',
+			word_file = None, lemma_file = None):
+	if 'word' in target and word_file is not None:
+		vec1 = CountVectorizer(decode_error= 'ignore',
+										ngram_range=ngram_range,
+										lowercase=True,
+										analyzer = analyzer,
+										token_pattern= pattern,
+										min_df=2)
+
+		vec1.fit_transform(get_line_as_str(word_file))
+		vocab_word = vec1.vocabulary_.keys()
+	else:
+		vocab_word = []
+
+	if 'lemma' in target and lemma_file is not None:
+		vec2 = CountVectorizer(decode_error= 'ignore',
+										ngram_range=ngram_range,
+										lowercase=True,
+										analyzer = analyzer,
+										token_pattern= pattern,
+										min_df=2)
+
+		vec2.fit_transform(get_line_as_str(lemma_file))
+		vocab_lemma = vec2.vocabulary_.keys()
+	else:
+		vocab_lemma = []
+
+	if 'error_icle' in target:
+		with open('../data/typo_dict_icle.pickle', 'rb') as handle:
+			typo_dict = pickle.load(handle)
+		vocab_typo = typo_dict.keys()
+	elif 'error_ets' in target:
+		with open('../data/typo_dict_ets.pickle', 'rb') as handle:
+			typo_dict = pickle.load(handle)
+		vocab_typo = typo_dict.keys()
+	elif 'errors' in target:
+		with open('../data/typo_dict_all.pickle', 'rb') as handle:
+			typo_dict = pickle.load(handle)
+		vocab_typo = typo_dict.keys()
+	else:
+		vocab_typo = []
+
+	return vocab_typo,vocab_word,vocab_lemma
+
+
+def get_full_vocab(word_file, lemma_file, ngram_range = (1,3), 
+	analyzer = 'word', pattern = r'\b\w+\b',
+	target = ['lemma', 'word']):
+	vocab_typo,vocab_word,vocab_lemma = get_separate_vocab(target = target, 
+											ngram_range = ngram_range,
+											analyzer = analyzer,
+											pattern = pattern,
+											word_file = word_file,
+											lemma_file = lemma_file)
+	return list(set(vocab_typo + vocab_word + vocab_lemma))
+
+def get_char_vocab(infile, ngram_range):
+	char_vectorizer = CountVectorizer(decode_error= 'ignore',
+									ngram_range=ngram_range,
+									lowercase=True,
+									analyzer = 'char_wb')
+	X = char_vectorizer.fit_transform(get_line_as_str(infile))
+	return char_vectorizer.vocabulary_.keys()
+
+def get_char_ngram(inflie, n):
+	"""
+	given the input file and ngram range n,
+	extract the ngram up to size n
+
+	Return:
+	vocab_all : a list of n lists, each one represents
+				the vocabulary related to that ngram size
+	"""
+	X_all = []
+	vocab_all = []
+	for i in range(1,n+1):
+		char_vectorizer = CountVectorizer(decode_error= 'ignore',
+									ngram_range=(i,i),
+									lowercase=True,
+									analyzer = 'char_wb')
+		X = char_vectorizer.fit_transform(get_line_as_str(inflie))
+		sorted_vocab = sorted(char_vectorizer.vocabulary_.items(), key=operator.itemgetter(1))
+		sorted_keys =  list(sorted_vocab[i][0] for i in range(len(sorted_vocab)))
+		vocab_all.append(sorted_keys)
+		with open('./tmp/char_ngram_train_vocab.txt', 'a') as f:
+#			for item in vocab_all[i-1]:
+			for k,v in char_vectorizer.vocabulary_.iteritems():
+				f.writelines("{:s} {:d}\n".format(k.encode('utf-8'),v))
+		with open('./tmp/char_ngram_train_vocab_sorted.txt', 'a') as f:
+#			for item in vocab_all[i-1]:
+			for k,v in sorted_vocab:
+				f.writelines("{:s} {:d}\n".format(k.encode('utf-8'),v))
+
+		s = X.sum(axis = 1)
+		frequency_X = coo_matrix(np.nan_to_num(X/s))
+		X_all.append(frequency_X)
+	X_stacked = hstack(X_all)
+	y = get_y(inflie)
+
+	return X_stacked,y,vocab_all
+
+def get_char_ngram_with_vocab(inflie, n, vocab):
+	"""
+	given a file, ngram range n and vocabulary
+	extract the ngram in file up to size n according to vocab
+	"""
+	X_all = []
+#	vocab_all = []
+#	for item in vocab:
+#		vocab_all += item
+	for i in range(1,len(vocab)+1):
+		char_vectorizer = CountVectorizer(decode_error= 'ignore',
+									ngram_range=(i,i),
+									lowercase=True,
+									analyzer = 'char_wb',
+#									vocabulary = vocab_all)
+									vocabulary = vocab[i-1])
+		X = char_vectorizer.fit_transform(get_line_as_str(inflie))
+		with open('./tmp/char_ngram_test_vocab.txt', 'a') as f:
+			for k,v in char_vectorizer.vocabulary_.iteritems():
+				f.writelines("{:s} {:d}\n".format(k.encode('utf-8'),v))
+		
+		s = X.sum(axis = 1)
+		frequency_X = coo_matrix(np.nan_to_num(X/s))
+		X_all.append(frequency_X)
+	X_stacked = hstack(X_all)
+	y = get_y(inflie)
+
+	return X_stacked,y
+
+def transform_to_sparse(inflie, N, feature_size,vectorizer = None):
+	"""
+	N: the number of instances in the file 
+	"""
+	if vectorizer is not None:
+		X = Scipy2Corpus(vectorizer.fit_transform(get_line_as_str(inflie)))
+		# tfidf = TfidfModel(X)
+		# train_X = tfidf[X]
+		logen = LogEntropyModel(X)
+		x = logen[X]
+		y = get_y(inflie)
+		data = []
+		rows = []
+		cols = []
+		line_count = 0
+		for line in x:
+			for elem in line:
+				rows.append(line_count)
+				cols.append(elem[0])
+				data.append(elem[1])
+			line_count += 1
+	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
+	return csr_matrix((data,(rows,cols)),shape=(N, feature_size)), y
+
+
+# error with error file
+# but word+lemma only with word+lemma file
+L1_LABEL_SET = ['ARA','DEU','FRA','HIN','ITA','JPN','KOR','SPA','TEL','TUR','ZHO']
+								
+
+def get_error_ngram(char_n =3, file_pattern = 'with_typo_icle7'):
+	#file_pattern = 'data'
+	#file_pattern = 'data_without_typo_icle7'
+	train_file = '../data/NLI/toefl11/train+dev_'+file_pattern+'.txt'
+	dev_file = '../data/NLI/toefl11/dev_'+file_pattern+'.txt'
+	test_file = '../data/NLI/toefl11/test_'+file_pattern+'.txt'
+	
+	vocab_file = '../data/NLI/toefl11/train+dev_typo_icle7.txt'
+#	vocab_file = '../data/NLI/toefl11/train+dev_typo_ets.txt'
+#	vocab_file = train_file
+#	vocab_file_error = '../data/NLI/toefl11/train+dev_typo_icle7.txt'
+#	vocab_file_correct = '../data/NLI/toefl11/train+dev_data_without_typo_icle7.txt'
+
+	#use char (1-3) grams of errors 
+	__, _, vocab_char = get_char_ngram(vocab_file,char_n)	
+#	for i in range(char_n):
+#	 	print(len(vocab_char[i]))
+#	__, _, vocab_error = get_char_ngram(vocab_file_error,char_n)
+#	__, _, vocab_correct = get_char_ngram(vocab_file_correct,char_n)
+#	vocab_char = []
+#	for i in range(char_n):
+#		diff = list(set(vocab_error[i]).difference(set(vocab_correct[i])))
+#		if len(diff) != 0:
+#			vocab_char.append(diff)
+	for i in range(len(vocab_char)):
+	 	print(len(vocab_char[i]))
+	
+	train_X_error, train_y = get_char_ngram_with_vocab(train_file,char_n,vocab_char)
+	dev_X_error, dev_y = get_char_ngram_with_vocab(dev_file,char_n, vocab_char)
+	test_X_error, test_y = get_char_ngram_with_vocab(test_file,char_n,vocab_char)
+	print(train_X_error.shape)
+	print(dev_X_error.shape)
+	print(test_X_error.shape)
+	# print(train_X_error.tocsr()[0])
+	return train_X_error, train_y,dev_X_error, dev_y,test_X_error, test_y, vocab_char
+	
+def get_word_ngram(ngram_range = (1,3), file_pattern = 'with_lemma_typo_tt'):
+	#'with_lemma_tt'
+	#'with_lemma_tt_typo_icle7'
+
+	train_file_w = '../data/NLI/toefl11/train+dev_'+file_pattern+'.txt'
+	dev_file_w = '../data/NLI/toefl11/dev_'+file_pattern +'.txt'
+	test_file_w = '../data/NLI/toefl11/test_'+file_pattern +'.txt'
+
+	word_file = '../data/NLI/toefl11/train+dev_data.txt'
+	lemma_file = '../data/NLI/toefl11/train+dev_lemma_tt.txt'
+
+	vocab_word = get_full_vocab(word_file = word_file,lemma_file = lemma_file,
+			analyzer = 'word',
+			ngram_range = ngram_range, target = ['lemma', 'word'])
+
+	word_vectorizer = CountVectorizer(decode_error= 'ignore',
+									ngram_range=ngram_range,
+									lowercase=True,
+									analyzer = 'word',
+									token_pattern=r'\b\w+\b',
+									vocabulary=vocab_word)
+
+	#use word ngram (with lemma or error)
+	train_X_sparse, train_y = transform_to_sparse(inflie = train_file_w,
+							N = 11000, feature_size = len(vocab_word),
+							vectorizer = word_vectorizer)
+							# mat_shape = (11000, len(vocab)))
+	# _, train_y_lf, _1 = group_languages(n_groups = 3, y = train_y)
+	dev_X_sparse, dev_y = transform_to_sparse(inflie = dev_file_w, 
+							N = 1100, feature_size = len(vocab_word),
+							vectorizer = word_vectorizer)
+							# mat_shape = (1100, len(vocab)))
+	# _, dev_y_lf, _1 = group_languages(n_groups = 3, y =  dev_y)
+	test_X_sparse, test_y = transform_to_sparse(inflie = test_file_w, 
+							N = 1100, feature_size = len(vocab_word),
+							vectorizer = word_vectorizer)
+							# mat_shape = (1100, len(vocab)))
+	# _, test_y_lf, _1 = group_languages(n_groups = 3, y = test_y)
+
+	print(train_X_sparse.shape)
+	print(dev_X_sparse.shape)
+	print(test_X_sparse.shape)
+	# print(train_X_sparse.tocsr()[0])
+	return train_X_sparse, train_y,dev_X_sparse, dev_y,test_X_sparse, test_y
+
+def main():
+	print(sys.argv[1])
+	train_X_sparse, train_y,dev_X_sparse, dev_y,test_X_sparse, test_y =get_word_ngram()
+	train_X_error, train_y,dev_X_error, dev_y,test_X_error, test_y, vocab_char= get_error_ngram()
+
+	train_X_sparse_matrix = hstack([train_X_error, train_X_sparse])
+	dev_X_sparse_matrix = hstack([dev_X_error,dev_X_sparse])
+	test_X_sparse_matrix = hstack([test_X_error,test_X_sparse])
+#	train_X_sparse_matrix = train_X_error
+#	dev_X_sparse_matrix = dev_X_error
+#	test_X_sparse_matrix = test_X_error
+
+#	train_X_sparse_matrix = train_X_sparse
+#	dev_X_sparse_matrix = dev_X_sparse
+#	test_X_sparse_matrix = test_X_sparse
+	print(train_X_sparse_matrix.shape)
+	print(dev_X_sparse_matrix.shape)
+	print(test_X_sparse_matrix.shape)
+
+#	# cross validation for deciding the C value
+#	n_folds = 10
+#	# C_values = [10,100,1000,1600,3200]
+#	C_values = [100]
+#	scores_mean, scores_std = [],[]
+#	for c in C_values:
+#		clf_svc = svm.LinearSVC(C=c, multi_class ='ovr')
+#		this_scores = cross_val_score(clf_svc, train_X_sparse_matrix,
+#									train_y, cv=n_folds, n_jobs=4,
+#									scoring = 'accuracy')
+#		print('this cross_val_score: \n{:s}'.format(" ".join(
+#			str(score) for score in this_scores)))
+#		print('mean: {:f}'.format(np.mean(this_scores)))
+#		print('std: {:f}'.format(np.std(this_scores)))
+#		scores_mean.append(np.mean(this_scores))
+#		scores_std.append(np.std(this_scores))
+#	print('the mean scores of cross validation: {:s}'.format(" ".join(
+#			str(score) for score in scores_mean)))
+#	print('the std of cross validation: {:s}'.format(" ".join(
+#			str(score) for score in scores_std)))
+#	bestC = C_values[ int(np.argmax(scores_mean)) ]
+#	print('best C value: {:f}'.format(bestC))
+#	clf_svc = svm.LinearSVC(C=bestC, multi_class ='ovr')
+
+	clf_svc = svm.LinearSVC(C=100, multi_class ='ovr')
+	clf_svc.fit(train_X_sparse_matrix,train_y)
+
+	pred_val = clf_svc.predict(dev_X_sparse_matrix)
+	acc_val = accuracy_score(dev_y,pred_val)
+	print("val acc (normalized feature vec, svc): {:f}".format(acc_val))
+
+	pred_test = clf_svc.predict(test_X_sparse_matrix)
+	proba_test = clf_svc.decision_function(test_X_sparse_matrix)
+	acc_test = accuracy_score(test_y,pred_test)
+	print("test acc (normalized feature vec, svc): {:f}".format(acc_test))
+
+	# threshold = np.mean(proba_test)
+	# print("threshold: {:f}".format(threshold))
+	sorted_pred = np.argsort(proba_test, axis = 1)[:,::-1]
+	# # print(sorted_pred[0])
+	# #check the sorting is right
+	# y_ = sorted_pred[:,0]
+	# acc_test_ = accuracy_score(test_y,y_)
+	# print(acc_test_)
+
+	# i = 0
+	# c = 0
+	# for y, prob in zip(test_y, sorted_pred):
+	# 	if y != prob[0]:
+	# 		pos = prob.tolist().index(y)+1
+	# 		print(sorted(proba_test[i,:]))
+	# 		if pos == 2 or pos == 3:
+	# 			c += 1
+	# 		# print("wrong pred at {:d}, the correct label is at position {:d}".format(i,pos))
+	# 	i += 1
+	# print("n of true pred at 2nd and 3rd position: {:d}".format(c)) #90
+
+	# clf_svc.fit(train_X_sparse_matrix,train_y_lf)
+	# pred_test_lf = clf_svc.predict(test_X_sparse_matrix)
+	# lf = clf_svc.decision_function(test_X_sparse_matrix)
+	# proba_test_lf = np.column_stack((lf[:,2], lf[:,0], lf[:,0], 
+	# 				 lf[:,2], lf[:,0], lf[:,1],
+	# 				 lf[:,1], lf[:,0], lf[:,2],
+	# 				 lf[:,0], lf[:,1])) #(1100 x 11)
+	# acc_test_lf = accuracy_score(test_y_lf,pred_test_lf)
+	# print("test acc for lf classification: {:f}".format(acc_test_lf))
+	# new_test_prob = proba_test
+
+	# idx = 0
+	# c_unconf = 0
+	# inner_clf_folder = '/home/lchen/Thesis/ETS_model_files/NLI/group_tmp/'
+	# clfs = [(inner_clf_folder + 'ARA-TEL-HIN.pickle', [0,3,8]), \
+	# 		(inner_clf_folder + 'ITA-SPA-FRA-DEU-TUR.pickle', [4,7,2,9,1]), \
+	# 		(inner_clf_folder + 'ZHO-KOR-JPN.pickle', [5,6,10])]
+	# diff1s,diff2s,small_diff1s,small_diff2s = [],[],[],[]
+	# for item in sorted_pred:
+	# 	diff1 = sorted(proba_test[idx,:])[-1] - sorted(proba_test[idx,:])[-2]
+	# 	diff2 = sorted(proba_test[idx,:])[-2] - sorted(proba_test[idx,:])[-3]
+	# 	diff1s.append(diff1)
+	# 	diff2s.append(diff2)
+		
+	# 	if diff1 < 0.1:
+	# 		c_unconf += 1
+	# 		small_diff1s.append(diff1)
+	# 		small_diff2s.append(diff2)
+	# 		print("diff1, diff2: {:f}, {:f}".format(diff1,diff2))
+	# 		if not in_same_lf(item[0], item[1]):
+	# 			print("2nd step")
+	# 			new_proba = proba_test[idx,:] + proba_test_lf[idx,:]
+	# 			new_test_prob[idx,:] = new_proba
+	# 		else:
+	# 			idx_g = decide_group(item[0], item[1])
+	# 			if idx_g is not None:					
+	# 				inner_clf_file, class_idxs = clfs[idx_g]
+	# 				with open(inner_clf_file, 'rb') as handle:
+	# 					inner_clf = pickle.load(handle)
+	# 				proba_in = inner_clf.decision_function(train_X_sparse_matrix[idx,:])[0] #probabilities
+	# 				print(proba_in.shape)
+
+	# 				for c_id, proba in zip(class_idxs, proba_in):
+	# 					# print(c_id)
+	# 					# print(proba)
+	# 					new_test_prob[idx, c_id] += proba
+	# 				# c_idx = inner_clf.predict(train_X_sparse_matrix[idx,:]) #pred class
+	# 				# new_test_prob[idx,c_idx] += np.max(proba_in)
+
+	# 	idx += 1
+	# print("total test examples: {:d}".format(idx))
+	# print("the average diff between 1st and 2nd: {:f}".format(sum(diff1s)/float(len(diff1s))))
+	# print("the average diff between 2nd and 3rd: {:f}".format(sum(diff2s)/float(len(diff2s))))
+	# print(sorted(small_diff1s))
+	# print(sorted(small_diff2s))
+	# print(sum(small_diff1s)/float(len(small_diff1s)))
+	# print(sum(small_diff2s)/float(len(small_diff2s)))
+
+	# new_res = (np.argsort(new_test_prob, axis = 1)[:,::-1])[:,0]
+	# new_acc = accuracy_score(new_res, test_y)
+	# print("updated reuslt: {:f}".format(new_acc))
+
+	# #print the confusion matrix out for latex report
+	# cm = confusion_matrix(test_y,pred_test)
+	# i = 0
+	# heading = " & ".join([x[1] for x in L1_LABEL_SET])
+	# print()
+	# for item in cm:
+	# 	print(L1_LABEL_SET(i) + " & "+ " & ".join(item))
+	# 	i += 1
+	
+	# most_informative_feature_for_class(vectorizer, clf_svc, n=20)
+	
+	vocab_char_all = []
+	for i in range(len(vocab_char)):
+		vocab_char_all += vocab_char[i]
+	print("the length error char list (all): {:d}".format(len(vocab_char_all)))
+	most_informative_char_for_class(clf_svc,error_char_list = vocab_char_all , n=10)
+	
+#	most_informative_error_for_class(vectorizer, clf_svc, n=20, error_list = vocab_char_all )
+
+if __name__ == "__main__":
+	main()
