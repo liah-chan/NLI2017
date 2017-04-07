@@ -75,34 +75,19 @@ def get_separate_vocab(target = ['word', 'lemma', 'error'],ngram_range = (1,3),
 	else:
 		vocab_lemma = []
 
-	if 'error_icle' in target:
-		with open('../data/typo_dict_icle.pickle', 'rb') as handle:
-			typo_dict = pickle.load(handle)
-		vocab_typo = typo_dict.keys()
-	elif 'error_ets' in target:
-		with open('../data/typo_dict_ets.pickle', 'rb') as handle:
-			typo_dict = pickle.load(handle)
-		vocab_typo = typo_dict.keys()
-	elif 'errors' in target:
-		with open('../data/typo_dict_all.pickle', 'rb') as handle:
-			typo_dict = pickle.load(handle)
-		vocab_typo = typo_dict.keys()
-	else:
-		vocab_typo = []
-
-	return vocab_typo,vocab_word,vocab_lemma
+	return vocab_word,vocab_lemma
 
 
 def get_full_vocab(word_file = None, lemma_file = None, ngram_range = (1,3), 
 	analyzer = 'word', pattern = r'\b\w+\b',
 	target = ['lemma', 'word']):
-	vocab_typo,vocab_word,vocab_lemma = get_separate_vocab(target = target, 
+	vocab_word,vocab_lemma = get_separate_vocab(target = target, 
 											ngram_range = ngram_range,
 											analyzer = analyzer,
 											pattern = pattern,
 											word_file = word_file,
 											lemma_file = lemma_file)
-	return list(set(vocab_typo + vocab_word + vocab_lemma))
+	return list(set(vocab_word + vocab_lemma))
 
 def get_char_vocab(infile, ngram_range):
 	char_vectorizer = CountVectorizer(decode_error= 'ignore',
@@ -190,29 +175,6 @@ def transform_to_sparse(inflie, N, feature_size,vectorizer = None):
 			line_count += 1
 	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
 	return csr_matrix((data,(rows,cols)),shape=(N, feature_size)), y								
-
-# def get_error_ngram(char_n =3, file_pattern = 'data'):
-# 	#file_pattern = 'data'
-# 	#file_pattern = 'data_without_typo_icle7'
-# 	train_file = '../data/train+dev_'+file_pattern+'.txt'
-# 	dev_file = '../data/dev_'+file_pattern+'.txt'
-# 	test_file = '../data/test_'+file_pattern+'.txt'
-	
-# 	vocab_file = '../data/train+dev_typo_icle7.txt'
-
-# 	#use char (1-3) grams of errors 
-# 	__, _, vocab_char = get_char_ngram(vocab_file,char_n)	
-# #	for i in range(len(vocab_char)):
-# #	 	print(len(vocab_char[i]))
-	
-# 	train_X_error, train_y = get_char_ngram_with_vocab(train_file,char_n,vocab_char)
-# 	dev_X_error, dev_y = get_char_ngram_with_vocab(dev_file,char_n, vocab_char)
-# 	test_X_error, test_y = get_char_ngram_with_vocab(test_file,char_n,vocab_char)
-# 	print(train_X_error.shape)
-# 	print(dev_X_error.shape)
-# 	print(test_X_error.shape)
-# 	# print(train_X_error.tocsr()[0])
-# 	return train_X_error, train_y,dev_X_error, dev_y,test_X_error, test_y, vocab_char
 	
 def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 
@@ -253,12 +215,6 @@ def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 
 def main():
 	train_X_sparse_matrix, train_y,dev_X_sparse_matrix, dev_y =get_word_ngram()
-
-	# train_X_error, train_y,dev_X_error, dev_y,test_X_error, test_y, vocab_char= get_error_ngram()
-	# train_X_sparse_matrix = hstack([train_X_error, train_X_sparse])
-	# dev_X_sparse_matrix = hstack([dev_X_error,dev_X_sparse])
-	# test_X_sparse_matrix = hstack([test_X_error,test_X_sparse])
-
 	print(train_X_sparse_matrix.shape)
 	print(dev_X_sparse_matrix.shape)
 	# print(test_X_sparse_matrix.shape)
