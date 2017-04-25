@@ -15,6 +15,7 @@ from sklearn import svm
 import sys
 import operator
 from operator import itemgetter
+form itertools import izip
 
 L1_LABEL_SET = ['ARA','GER','FRE','HIN','ITA','JPN','KOR','SPA','TEL','TUR','CHI']
 
@@ -37,57 +38,67 @@ def get_y(filename):
 			idxs.append(idx)
 	return np.array(idxs,dtype=np.int)
 
-def get_line_as_str(filename):
+# def get_line_as_str(filename):
+# 	"""
+# 	read lines in file and return as generator
+# 	"""
+# 	with open(filename,'r') as f:
+# 		for line in f:
+# 			essay = line.split('\t')[0]
+# 			yield str(essay)
+
+def get_line_as_str(word_file = None, lemma_file = None):
 	"""
 	read lines in file and return as generator
 	"""
-	with open(filename,'r') as f:
-		for line in f:
-			essay = line.split('\t')[0]
-			yield str(essay)
-
-def get_separate_vocab(target = ['word', 'lemma', 'error'],ngram_range = (1,3),
-			analyzer = 'word', pattern = r'\b\w+\b',
-			word_file = None, lemma_file = None):
-	if 'word' in target and word_file is not None:
-		vec1 = CountVectorizer(decode_error= 'ignore',
-										ngram_range=ngram_range,
-										lowercase=True,
-										analyzer = analyzer,
-										token_pattern= pattern,
-										min_df=2)
-
-		vec1.fit_transform(get_line_as_str(word_file))
-		vocab_word = vec1.vocabulary_.keys()
+	if word_file is not None and lemma_file is not None:
+		with open(word_file, 'r') as wordf, open(lemma_file,'r') as lemmaf:
+			for word, lemma in izip(wordf, lemmaf):
+				word = word.strip()
+				lemma = lemma.strip()
+				yield str(word+' '+lemma)
 	else:
-		vocab_word = []
+		filename = word_file if word_file is not None else lemma_file
+		with open(filename,'r') as f:
+			for line in f:
+				essay = line.split('\t')[0]
+				yield str(essay)
 
-	if 'lemma' in target and lemma_file is not None:
-		vec2 = CountVectorizer(decode_error= 'ignore',
-										ngram_range=ngram_range,
-										lowercase=True,
-										analyzer = analyzer,
-										token_pattern= pattern,
-										min_df=2)
-
-		vec2.fit_transform(get_line_as_str(lemma_file))
-		vocab_lemma = vec2.vocabulary_.keys()
-	else:
-		vocab_lemma = []
-
-	return vocab_word,vocab_lemma
+def combine_word_lemma(word_file, lemma_file):
 
 
-def get_full_vocab(word_file = None, lemma_file = None, ngram_range = (1,3), 
-	analyzer = 'word', pattern = r'\b\w+\b',
-	target = ['lemma', 'word']):
-	vocab_word,vocab_lemma = get_separate_vocab(target = target, 
-											ngram_range = ngram_range,
-											analyzer = analyzer,
-											pattern = pattern,
-											word_file = word_file,
-											lemma_file = lemma_file)
-	return list(set(vocab_word + vocab_lemma))
+# def get_separate_vocab(target = ['word', 'lemma', 'error'],ngram_range = (1,3),
+# 			analyzer = 'word', pattern = r'\b\w+\b',
+# 			word_file = None, lemma_file = None):
+# 	if 'word' in target and word_file is not None:
+# 		vec1 = CountVectorizer(decode_error= 'ignore',
+# 										ngram_range=ngram_range,
+# 										lowercase=True,
+# 										analyzer = analyzer,
+# 										token_pattern= pattern,
+# 										min_df=2)
+
+# 		vec1.fit_transform(get_line_as_str(word_file))
+# 		vocab_word = vec1.vocabulary_.keys()
+# 	else:
+# 		vocab_word = []
+
+# 	if 'lemma' in target and lemma_file is not None:
+# 		vec2 = CountVectorizer(decode_error= 'ignore',
+# 										ngram_range=ngram_range,
+# 										lowercase=True,
+# 										analyzer = analyzer,
+# 										token_pattern= pattern,
+# 										min_df=2)
+
+# 		vec2.fit_transform(get_line_as_str(lemma_file))
+# 		vocab_lemma = vec2.vocabulary_.keys()
+# 	else:
+# 		vocab_lemma = []
+
+# 	return vocab_word,vocab_lemma
+
+
 
 def get_char_vocab(infile, ngram_range):
 	char_vectorizer = CountVectorizer(decode_error= 'ignore',
@@ -152,71 +163,98 @@ def get_char_ngram_with_vocab(inflie, n, vocab):
 
 	return X_stacked,y
 
-# def transform_to_sparse(inflie, N, feature_size,vectorizer = None):
-# 	"""
-# 	N: the number of instances in the file 
-# 	"""
-# 	if vectorizer is not None:
-# 		X = Scipy2Corpus(vectorizer.fit_transform(get_line_as_str(inflie)))
-# 		# tfidf = TfidfModel(X)
-# 		# train_X = tfidf[X]
-# 		logen = LogEntropyModel(X)
-# 		x = logen[X]
-# 		y = get_y(inflie)
-# 		data = []
-# 		rows = []
-# 		cols = []
-# 		line_count = 0
-# 		for line in x:
-# 			for elem in line:
-# 				rows.append(line_count)
-# 				cols.append(elem[0])
-# 				data.append(elem[1])
-# 			line_count += 1
-# 	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
-# 	return csr_matrix((data,(rows,cols)),shape=(N, feature_size)), y	
-	
-def transform_to_sparse(inflie, N,feature_size,vectorizer = None):
-	vectorizer = CountVectorizer(decode_error= 'ignore',
-									ngram_range=ngram_range,
-									lowercase=True,
-									analyzer = 'word',
-									binary = True,
-									token_pattern=r'\b\w+\b')
-	X = vectorizer.fit_transform(get_line_as_str(inflie))
-	y = get_y(inflie)
-
+def transform_to_sparse(inflies, N, feature_size,vectorizer = None, 
+	feature_weight = 'logent'):
+	"""
+	infiles: dict in the form: {word_file: "path", lemma_file: "path"}
+	N: the number of instances in the file 
+	"""
+	if vectorizer is not None:
+		if feature_weight = 'binary':
+			vectorizer = CountVectorizer(decode_error= 'ignore',
+										ngram_range=ngram_range,
+										lowercase=True,
+										analyzer = 'word',
+										binary = True,
+										token_pattern=r'\b\w+\b')
+			X = vectorizer.fit_transform(get_line_as_str(**inflies))
+			y = get_y(inflie)
+		else:
+			X = Scipy2Corpus(vectorizer.fit_transform(get_line_as_str(**inflies)))
+			if feature_weight = 'tfidf':
+				weighting_scheme = TfidfModel(X)
+			else if feature_weight == 'logent':			
+				weighting_scheme = LogEntropyModel(X)
+			x = weighting_scheme[X]
+			y = get_y(inflie)
+			data = []
+			rows = []
+			cols = []
+			line_count = 0
+			for line in x:
+				for elem in line:
+					rows.append(line_count)
+					cols.append(elem[0])
+					data.append(elem[1])
+				line_count += 1
+			X = csr_matrix((data,(rows,cols)),shape=(N, feature_size))
+	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
 	return X, y	
-	
-def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 
-	train_file_w = '../data/train_'+file_pattern+'.txt'
-	dev_file_w = '../data/dev_'+file_pattern +'.txt'
-	# test_file_w = '../data/test_'+file_pattern +'.txt'
+def get_base_feature(word_file = None, lemma_file = None, ngram_range = (1,3), 
+	analyzer = 'word', pattern = r'\b\w+\b',#target = ['lemma', 'word'],
+	word_file = '../data/train_data.word.txt', 
+	lemma_file = '../data/train_data.lemma.txt',
+	train_size = 11000, dev_size = 1100, test_size = 1100):
+	"""
+	getting word/lemma n-grams as base feature
+	"""
 
-	word_file = '../data/train_data.txt'
-	# lemma_file = '../data/train_data.txt'
+	# if 'word' in target and word_file is not None:
+	if word_file is not None:
+		vec1 = CountVectorizer(decode_error= 'ignore',
+										ngram_range=ngram_range,
+										lowercase=True,
+										analyzer = analyzer,
+										token_pattern= pattern,
+										min_df=2)
 
-	vocab_word = get_full_vocab(word_file = word_file,
-			analyzer = 'word',
-			ngram_range = ngram_range, target = ['word'])
+		vec1.fit_transform(get_line_as_str(word_file = word_file))
+		vocab_word = vec1.vocabulary_.keys()
+	else:
+		vocab_word = []
 
-	word_vectorizer = CountVectorizer(decode_error= 'ignore',
+	# if 'lemma' in target and lemma_file is not None:
+	if lemma_file is not None:
+		vec2 = CountVectorizer(decode_error= 'ignore',
+										ngram_range=ngram_range,
+										lowercase=True,
+										analyzer = analyzer,
+										token_pattern= pattern,
+										min_df=2)
+
+		vec2.fit_transform(get_line_as_str(lemma_file = lemma_file))
+		vocab_lemma = vec2.vocabulary_.keys()
+	else:
+		vocab_lemma = []
+	vocab_all = list(set(vocab_word + vocab_lemma))
+
+	vec_all = CountVectorizer(decode_error= 'ignore',
 									ngram_range=ngram_range,
 									lowercase=True,
 									analyzer = 'word',
 									token_pattern=r'\b\w+\b',
-									vocabulary=vocab_word)
-
+									vocabulary=vocab_all)
+	inflies = {'word_file': word_file, 'lemma_file': lemma_file}
 	#use word ngram (with lemma or error)
-	train_X_sparse, train_y = transform_to_sparse(inflie = train_file_w,
-							N = 11000, feature_size = len(vocab_word),
-							vectorizer = word_vectorizer)
-	dev_X_sparse, dev_y = transform_to_sparse(inflie = dev_file_w, 
-							N = 1100, feature_size = len(vocab_word),
-							vectorizer = word_vectorizer)
+	train_X_sparse, train_y = transform_to_sparse(inflies = inflies,
+							N = train_size, feature_size = len(vocab_all),
+							vectorizer = vec_all)
+	dev_X_sparse, dev_y = transform_to_sparse(inflies = infiles, 
+							N = dev_size, feature_size = len(vocab_all),
+							vectorizer = vec_all)
 	# test_X_sparse, test_y = transform_to_sparse(inflie = test_file_w, 
-	# 						N = 1100, feature_size = len(vocab_word),
+	# 						N = 1100, feature_size = len(vocab_all),
 	# 						vectorizer = word_vectorizer)
 
 	print(train_X_sparse.shape)
@@ -226,7 +264,7 @@ def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 	return train_X_sparse, train_y,dev_X_sparse, dev_y#,test_X_sparse, test_y
 
 def main():
-	train_X_sparse_matrix, train_y,dev_X_sparse_matrix, dev_y =get_word_ngram()
+	train_X_sparse_matrix, train_y,dev_X_sparse_matrix, dev_y =get_base_feature()
 	# train_X_sparse_matrix, train_y,vocab_all = get_char_ngram('../data/train_data.txt',3)
 	print(train_X_sparse_matrix.shape)
 	print(dev_X_sparse_matrix.shape)
