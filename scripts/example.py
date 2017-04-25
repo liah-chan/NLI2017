@@ -27,7 +27,7 @@ def encode_label(label):
 def get_y(filename):
 	"""
 	given data file (containing all examples in train, dev or test set), 
-	return 1d array containing label indicator 
+	return 1d array containing label indicator
 	"""
 	idxs = []
 	with open(filename,'r') as f:
@@ -152,29 +152,41 @@ def get_char_ngram_with_vocab(inflie, n, vocab):
 
 	return X_stacked,y
 
-def transform_to_sparse(inflie, N, feature_size,vectorizer = None):
-	"""
-	N: the number of instances in the file 
-	"""
-	if vectorizer is not None:
-		X = Scipy2Corpus(vectorizer.fit_transform(get_line_as_str(inflie)))
-		# tfidf = TfidfModel(X)
-		# train_X = tfidf[X]
-		logen = LogEntropyModel(X)
-		x = logen[X]
-		y = get_y(inflie)
-		data = []
-		rows = []
-		cols = []
-		line_count = 0
-		for line in x:
-			for elem in line:
-				rows.append(line_count)
-				cols.append(elem[0])
-				data.append(elem[1])
-			line_count += 1
-	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
-	return csr_matrix((data,(rows,cols)),shape=(N, feature_size)), y								
+# def transform_to_sparse(inflie, N, feature_size,vectorizer = None):
+# 	"""
+# 	N: the number of instances in the file 
+# 	"""
+# 	if vectorizer is not None:
+# 		X = Scipy2Corpus(vectorizer.fit_transform(get_line_as_str(inflie)))
+# 		# tfidf = TfidfModel(X)
+# 		# train_X = tfidf[X]
+# 		logen = LogEntropyModel(X)
+# 		x = logen[X]
+# 		y = get_y(inflie)
+# 		data = []
+# 		rows = []
+# 		cols = []
+# 		line_count = 0
+# 		for line in x:
+# 			for elem in line:
+# 				rows.append(line_count)
+# 				cols.append(elem[0])
+# 				data.append(elem[1])
+# 			line_count += 1
+# 	# return csr_matrix((data,(rows,cols)),shape=mat_shape), y
+# 	return csr_matrix((data,(rows,cols)),shape=(N, feature_size)), y	
+	
+def transform_to_sparse(inflie, N,feature_size,vectorizer = None):
+	vectorizer = CountVectorizer(decode_error= 'ignore',
+									ngram_range=ngram_range,
+									lowercase=True,
+									analyzer = 'word',
+									binary = True,
+									token_pattern=r'\b\w+\b')
+	X = vectorizer.fit_transform(get_line_as_str(inflie))
+	y = get_y(inflie)
+
+	return X, y	
 	
 def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 
@@ -215,6 +227,7 @@ def get_word_ngram(ngram_range = (1,3), file_pattern = 'data'):
 
 def main():
 	train_X_sparse_matrix, train_y,dev_X_sparse_matrix, dev_y =get_word_ngram()
+	# train_X_sparse_matrix, train_y,vocab_all = get_char_ngram('../data/train_data.txt',3)
 	print(train_X_sparse_matrix.shape)
 	print(dev_X_sparse_matrix.shape)
 	# print(test_X_sparse_matrix.shape)
