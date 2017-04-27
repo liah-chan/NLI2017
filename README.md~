@@ -40,4 +40,4 @@ Feature | weighting | Dev acc.
 word + lemma n-grams (1,2,3) | logent | 84.09
 word + lemma n-grams (1,2,3) (including punctuation)| logent | 84.82
 word + lemma + char n-grams (1,2,3) | logent |84.54
-word + lemma n-grams (1,2,3) (including punctuation) | bin | 80.63
+word + lemma + char n-grams (1,2,3) (including punctuation) | bin | 80.63

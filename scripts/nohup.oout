@@ -1,0 +1,18 @@
+nohup: ignoring input
+extracting base features...
+8220992
+8220992
+8220992
+11000
+679210
+756229
+756229
+756229
+1100
+679210
+(11000, 679210)
+(1100, 679210)
+extracting character n-grams...
+(11000, 679210)
+(1100, 679210)
+val acc: 0.848182
