@@ -2,11 +2,15 @@
 ### 1. updated example.py for using word and/or lemma n-grams as base feature:
 use only word n-grams: 
 
-```get_base_feature(target = ['word'])```
+```
+get_base_feature(target = ['word'])
+```
 
 use both word n-grams and lemma n-grams:
 
-```get_base_feature(target = ['word','lemma']) ```
+```
+get_base_feature(target = ['word','lemma'])
+```
 
 
 ### 2. Including other features such as character n-grams returned by function```get_char_ngram()``` by using:
