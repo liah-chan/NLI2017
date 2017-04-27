@@ -112,22 +112,6 @@ def get_char_ngram(file_pattern, ngram_range):
 	dev_X_stacked = hstack(dev_X_all)
 	dev_y = get_y(dev_file)
 	return train_X_stacked,train_y,dev_X_stacked,dev_y
-
-def get_other_feature():
-	"""
-	function to extract other features
-	
-	Param
-	------
-	
-
-	Return
-	------
-	in a similar format as other functions for feature extraction
-	
-	"""
-
-	pass
 	
 def get_base_feature(file_pattern = '', ngram_range = (1,3), min_df = 2,feature_weight = 'logent',
 	analyzer = 'word', target = ['lemma', 'word'],	token_pattern = r'\b\w+\b',
@@ -271,15 +255,31 @@ def transform_to_sparse(infiles, N, feature_size,vectorizer = None,
 			print(feature_size)
 			X = csr_matrix((data,(rows,cols)),shape=(N, feature_size))
 	return X, y	
+
+def get_other_feature():
+	"""
+	function to extract other features
+	
+	Param
+	------
+	
+
+	Return
+	------
+	in a similar format as other functions for feature extraction
+	
+	"""
+
+	pass
 	
 def main():
 	file_pattern = ''
-	token_pattern = r'\b[[\w]+|\,|\;|\"|]'
+	token_pattern = r'[\w!#$%&()*+\-./:<=>?@[\]^_`{|}~]+'
 	
 	print('extracting base features...')
 	train_X_base, train_y,dev_X_base, dev_y = get_base_feature(file_pattern = file_pattern,
 					 feature_weight = 'binary',
-					 token_pattern = token_pattern,	#uncomment this one to use the pattern including punctuations				  
+					 # token_pattern = token_pattern,	#uncomment this one to use the pattern including punctuations				  
 					 train_size = 11000, 
 					 dev_size = 1100,
 					 target = ['word','lemma'])
